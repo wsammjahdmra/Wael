@@ -31,6 +31,7 @@ async function startServer() {
 
   // Mount API endpoints
   app.use('/api/v1', apiRouter);
+  app.use('/api', apiRouter);
 
   // Vite Integration in Development
   if (process.env.NODE_ENV !== 'production') {
