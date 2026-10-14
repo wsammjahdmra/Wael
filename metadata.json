@@ -1,0 +1,8 @@
+{
+  "name": "المهدي ال عمران للعقارات",
+  "description": "المنصة العقارية المتكاملة في اليمن لإدارة وتسويق العقارات والمشاريع السكنية والتجارية بالريال اليمني",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
