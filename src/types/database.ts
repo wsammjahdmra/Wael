@@ -28,6 +28,12 @@ export interface UserAccount {
   nationalIdMasked?: string;
   orgId?: string;
   avatarUrl?: string;
+  passwordHash?: string;
+  passwordSalt?: string;
+  failedAttempts?: number;
+  lockedUntil?: string;
+  resetOtp?: string;
+  resetOtpExpires?: string;
   createdAt: string;
   updatedAt: string;
 }

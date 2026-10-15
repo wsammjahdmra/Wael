@@ -18,7 +18,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   onFavoriteToggle,
   isFavorited = false,
 }) => {
-  const { user } = useAuth();
+  const { user, openVisitorGate } = useAuth();
   const { showToast } = useToast();
   const [fav, setFav] = React.useState(isFavorited);
   const [favCount, setFavCount] = React.useState(listing.favoritesCount || 0);
@@ -36,7 +36,7 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   const handleHeartClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user || user.role === 'visitor') {
-      showToast('يرجى تسجيل الدخول أو اختيار دور "مستخدم مسجل" لاستخدام المفضلة.', 'info');
+      openVisitorGate('إضافة هذا العقار إلى قائمة المفضلة');
       return;
     }
     setAnimating(true);

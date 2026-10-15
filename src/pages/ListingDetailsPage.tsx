@@ -37,7 +37,7 @@ export const ListingDetailsPage: React.FC<ListingDetailsPageProps> = ({
   onBack,
   onSelectListing,
 }) => {
-  const { user } = useAuth();
+  const { user, openVisitorGate } = useAuth();
   const { showToast } = useToast();
   const [listing, setListing] = useState<Listing | null>(null);
   const [activeImageIdx, setActiveImageIdx] = useState(0);
@@ -114,7 +114,7 @@ export const ListingDetailsPage: React.FC<ListingDetailsPageProps> = ({
 
   const handleToggleFav = async () => {
     if (!user || user.role === 'visitor') {
-      showToast('يرجى تسجيل الدخول أو اختيار دور مسجل لإضافة العقار إلى المفضلة.', 'info');
+      openVisitorGate('إضافة هذا العقار إلى قائمة المفضلة');
       return;
     }
     try {

@@ -19,6 +19,7 @@ import {
   SavedSearch,
   OrgMembership,
   Organization,
+  UserRole,
 } from '../types/database';
 
 const BASE_URL = '/api/v1';
@@ -81,13 +82,31 @@ export const api = {
 
   // Auth & Roles
   getMe: () => request<{ success: boolean; user: UserAccount; organization?: Organization }>('/auth/me'),
-  login: (credentials: { email?: string; phone?: string }) =>
+  login: (credentials: { identifier?: string; email?: string; phone?: string; password?: string }) =>
     request<{ success: boolean; user: UserAccount; message: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
     }),
-  register: (payload: { fullName: string; phone: string; email: string; role?: string; falLicenseNumber?: string }) =>
+  register: (payload: {
+    fullName: string;
+    phone: string;
+    email: string;
+    password: string;
+    role?: string;
+    falLicenseNumber?: string;
+  }) =>
     request<{ success: boolean; user: UserAccount; message: string }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  logout: () => request<{ success: boolean; message: string }>('/auth/logout', { method: 'POST' }),
+  forgotPassword: (contact: string) =>
+    request<{ success: boolean; message: string; simulatedOtp?: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ contact }),
+    }),
+  resetPassword: (payload: { contact: string; otp: string; newPassword: string }) =>
+    request<{ success: boolean; message: string }>('/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
@@ -148,6 +167,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  createReport: (payload: { listingId?: string; reason?: string; reasonType?: string; description: string; reporterContact?: string }) =>
+    request<{ success: boolean; referenceNo: string; message: string }>('/reports', {
+      method: 'POST',
+      body: JSON.stringify({
+        listingId: payload.listingId || 'lst_1',
+        reasonType: payload.reasonType || payload.reason || 'fake_ad',
+        description: payload.description,
+        reporterContact: payload.reporterContact,
+      }),
+    }),
   getAdminReports: () => request<{ success: boolean; count: number; reports: ReportCase[] }>('/admin/reports'),
   resolveReport: (id: string, payload: { status: string; resolutionNote: string; suspendListing?: boolean }) =>
     request<{ success: boolean; report: ReportCase; message: string }>(`/admin/reports/${id}/resolve`, {
@@ -205,13 +234,35 @@ export const api = {
       body: JSON.stringify({ decision }),
     }),
 
-  // Admin Metrics & Users
+  // Admin Metrics & Users & RBAC
   getAdminMetrics: () => request<{ success: boolean; metrics: any }>('/admin/metrics'),
   getAdminUsers: () => request<{ success: boolean; count: number; users: UserAccount[] }>('/admin/users'),
-  updateUserStatus: (id: string, status: string) =>
+  updateUserStatus: (id: string, status: string, reason?: string) =>
     request<{ success: boolean; user: UserAccount; message: string }>(`/admin/users/${id}/status`, {
       method: 'PUT',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
+    }),
+  updateUserRole: (id: string, role: UserRole, reason?: string) =>
+    request<{ success: boolean; user: UserAccount; message: string }>(`/admin/users/${id}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role, reason }),
+    }),
+  createUser: (payload: {
+    fullName: string;
+    phone: string;
+    email: string;
+    role: UserRole;
+    falLicenseNumber?: string;
+    nationalIdMasked?: string;
+    orgId?: string;
+  }) =>
+    request<{ success: boolean; user: UserAccount; message: string }>('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteUser: (id: string) =>
+    request<{ success: boolean; message: string }>(`/admin/users/${id}`, {
+      method: 'DELETE',
     }),
   getAuditEvents: () => request<{ success: boolean; count: number; events: any[] }>('/admin/audit-events'),
 

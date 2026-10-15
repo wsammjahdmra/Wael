@@ -3,6 +3,7 @@
  * منصة عقار — الإصدار الرابع
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { db } from './db';
 import { fetchNeighborhoodInsights } from './geminiMaps';
@@ -16,6 +17,7 @@ import {
   Invoice,
   Refund,
   UserRole,
+  UserAccount,
 } from '../types/database';
 import {
   checkMySQLStatus,
@@ -79,51 +81,204 @@ apiRouter.put('/settings', (req: Request, res: Response) => {
 // -------------------------------------------------------------
 // 2. Authentication, Profile & Role Switcher
 // -------------------------------------------------------------
+
+function hashPassword(password: string, salt: string = 'aqqar_salt_2026'): string {
+  return crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+}
+
 apiRouter.get('/auth/me', (req: Request, res: Response) => {
   const user = getCurrentUser();
   const org = user.orgId ? db.organizations.get(user.orgId) : undefined;
-  res.json({ success: true, user, organization: org });
+  // Never expose password hashes or reset OTP in public session
+  const safeUser = { ...user };
+  delete safeUser.passwordHash;
+  delete safeUser.passwordSalt;
+  delete safeUser.resetOtp;
+  res.json({ success: true, user: safeUser, organization: org });
 });
 
 apiRouter.post('/auth/login', (req: Request, res: Response) => {
-  const { email, phone } = req.body;
-  let foundUser = Array.from(db.users.values()).find(
-    (u) => (email && u.email.toLowerCase() === email.toLowerCase()) || (phone && u.phone === phone)
+  const { email, phone, identifier, password } = req.body;
+  const loginKey = (identifier || email || phone || '').trim().toLowerCase();
+
+  if (!loginKey) {
+    return res.status(400).json({ success: false, message: 'يرجى إدخال البريد الإلكتروني أو رقم الهاتف.' });
+  }
+
+  const foundUser = Array.from(db.users.values()).find(
+    (u) =>
+      u.email.toLowerCase() === loginKey ||
+      u.phone === loginKey ||
+      u.phone.replace(/[\s-]/g, '') === loginKey.replace(/[\s-]/g, '')
   );
 
   if (!foundUser) {
-    // If not found, log in as registered user default
-    foundUser = db.users.get('usr_reg_1');
+    return res.status(401).json({
+      success: false,
+      message: 'بيانات الدخول غير صحيحة، يرجى التحقق من البريد أو رقم الجوال.',
+    });
   }
 
-  if (foundUser) {
-    currentSessionUserId = foundUser.id;
-    return res.json({ success: true, user: foundUser, message: `مرحباً بك، ${foundUser.fullName}` });
+  // 1. Check account suspension
+  if (foundUser.status === 'suspended') {
+    db.recordAuditEvent({
+      userId: foundUser.id,
+      userRole: foundUser.role,
+      userName: foundUser.fullName,
+      eventType: 'LOGIN_BLOCKED_SUSPENDED',
+      entityName: 'user',
+      entityId: foundUser.id,
+      details: 'محاولة تسجيل دخول لحساب موقوف إدارياً',
+      ipAddress: req.ip || '127.0.0.1',
+    });
+    return res.status(403).json({
+      success: false,
+      message: 'هذا الحساب موقوف إدارياً لمخالفة سياسة المنصة. يرجى مراجعة إدارة الدعم الفني.',
+    });
   }
 
-  res.status(401).json({ success: false, message: 'بيانات الدخول غير صحيحة.' });
+  // 2. Check temporary lockout from brute-force attempts
+  if (foundUser.lockedUntil && new Date(foundUser.lockedUntil) > new Date()) {
+    const minutesLeft = Math.ceil((new Date(foundUser.lockedUntil).getTime() - Date.now()) / 60000);
+    return res.status(429).json({
+      success: false,
+      message: `تم قفل الحساب مؤقتاً لتكرار محاولات الدخول الخاطئة. يرجى المحاولة بعد ${minutesLeft} دقيقة أو استعادة كلمة المرور.`,
+    });
+  }
+
+  // 3. Password validation
+  if (password) {
+    const salt = foundUser.passwordSalt || 'aqqar_salt_2026';
+    const computedHash = hashPassword(password, salt);
+
+    // If user has a passwordHash, it must match.
+    // If user is a seed demo account without initial hash, allow default demo password 'Password@123' or initialize it
+    const isValidPassword =
+      (foundUser.passwordHash && foundUser.passwordHash === computedHash) ||
+      (!foundUser.passwordHash && (password === 'Password@123' || password.length >= 6));
+
+    if (!isValidPassword) {
+      foundUser.failedAttempts = (foundUser.failedAttempts || 0) + 1;
+      if (foundUser.failedAttempts >= 5) {
+        foundUser.lockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      }
+      db.recordAuditEvent({
+        userId: foundUser.id,
+        userRole: foundUser.role,
+        userName: foundUser.fullName,
+        eventType: 'LOGIN_FAILED',
+        entityName: 'user',
+        entityId: foundUser.id,
+        details: `محاولة دخول فاشلة بكلمة مرور خاطئة (محاولة رقم ${foundUser.failedAttempts})`,
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
+      return res.status(401).json({
+        success: false,
+        message:
+          foundUser.failedAttempts >= 5
+            ? 'تم قفل الحساب لمدة 15 دقيقة لتكرار المحاولات الخاطئة.'
+            : `كلمة المرور غير صحيحة. المحاولات المتبقية قبل القفل: ${5 - foundUser.failedAttempts}`,
+      });
+    }
+
+    // Set hashed password if not set
+    if (!foundUser.passwordHash) {
+      foundUser.passwordSalt = salt;
+      foundUser.passwordHash = computedHash;
+    }
+  }
+
+  // Login success: reset failed attempts
+  foundUser.failedAttempts = 0;
+  foundUser.lockedUntil = undefined;
+  currentSessionUserId = foundUser.id;
+
+  db.recordAuditEvent({
+    userId: foundUser.id,
+    userRole: foundUser.role,
+    userName: foundUser.fullName,
+    eventType: 'USER_LOGIN',
+    entityName: 'user',
+    entityId: foundUser.id,
+    details: `تسجيل دخول ناجح للمستخدم (${foundUser.fullName}) بالدور ${foundUser.role}`,
+    ipAddress: req.ip || '127.0.0.1',
+  });
+
+  const safeUser = { ...foundUser };
+  delete safeUser.passwordHash;
+  delete safeUser.passwordSalt;
+  delete safeUser.resetOtp;
+
+  res.json({
+    success: true,
+    user: safeUser,
+    message: `مرحباً بك، ${foundUser.fullName}`,
+  });
 });
 
 apiRouter.post('/auth/register', (req: Request, res: Response) => {
-  const { fullName, phone, email, role = 'registered_user', falLicenseNumber } = req.body;
+  const { fullName, phone, email, password, role = 'registered_user', falLicenseNumber } = req.body;
 
-  if (!fullName || !phone || !email) {
-    return res.status(400).json({ success: false, message: 'يرجى استكمال جميع الحقول الإلزامية (الاسم، الجوال، البريد).' });
+  if (!fullName || !phone || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى استكمال جميع الحقول الإلزامية: الاسم الكامل، رقم الجوال، البريد الإلكتروني، وكلمة المرور.',
+    });
   }
 
-  const existing = Array.from(db.users.values()).find((u) => u.email === email || u.phone === phone);
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: 'يجب أن لا تقل كلمة المرور عن 6 خانات وتحتوي على أحرف وأرقام.',
+    });
+  }
+
+  // Security Policy: Prevent public registration for administrative, supervisory, or financial roles
+  const prohibitedPublicRoles = [
+    'system_admin',
+    'operations_manager',
+    'content_moderator',
+    'compliance_officer',
+    'financial_officer',
+    'support_officer',
+  ];
+
+  if (prohibitedPublicRoles.includes(role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'غير مصرح: لا يمكن التسجيل العام في الأدوار الإدارية أو الرقابية. يتم تعيين هذه الأدوار حصراً بواسطة مدير النظام.',
+    });
+  }
+
+  // Check unique email and phone
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPhone = phone.trim();
+  const existing = Array.from(db.users.values()).find(
+    (u) => u.email.toLowerCase() === cleanEmail || u.phone === cleanPhone
+  );
+
   if (existing) {
-    return res.status(409).json({ success: false, message: 'رقم الجوال أو البريد الإلكتروني مسجل مسبقاً.' });
+    return res.status(409).json({
+      success: false,
+      message: 'رقم الجوال أو البريد الإلكتروني مسجل مسبقاً في النظام.',
+    });
   }
 
-  const newUser = {
+  const salt = crypto.randomBytes(8).toString('hex');
+  const passwordHash = hashPassword(password, salt);
+
+  const newUser: UserAccount = {
     id: `usr_${Date.now()}`,
-    phone,
-    email,
-    fullName,
+    phone: cleanPhone,
+    email: cleanEmail,
+    fullName: fullName.trim(),
     role: role as UserRole,
-    status: 'active' as const,
-    falLicenseNumber,
+    status: role === 'org_manager' || role === 'authorized_broker' ? 'pending_verification' : 'active',
+    falLicenseNumber: falLicenseNumber?.trim() || undefined,
+    passwordHash,
+    passwordSalt: salt,
+    failedAttempts: 0,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -138,11 +293,135 @@ apiRouter.post('/auth/register', (req: Request, res: Response) => {
     eventType: 'USER_REGISTERED',
     entityName: 'user',
     entityId: newUser.id,
-    details: `تسجيل حساب جديد بالدور: ${newUser.role}`,
+    details: `تسجيل حساب جديد بالدور: ${newUser.role} وحالة: ${newUser.status}`,
     ipAddress: req.ip || '127.0.0.1',
   });
 
-  res.status(201).json({ success: true, user: newUser, message: 'تم إنشاء الحساب بنجاح.' });
+  const safeUser = { ...newUser };
+  delete safeUser.passwordHash;
+  delete safeUser.passwordSalt;
+
+  res.status(201).json({
+    success: true,
+    user: safeUser,
+    message:
+      newUser.status === 'pending_verification'
+        ? 'تم إنشاء الحساب بنجاح وهو قيد التحقق من رخصة فال والتراخيص المهنية.'
+        : 'تم إنشاء الحساب وتسجيل الدخول بنجاح.',
+  });
+});
+
+apiRouter.post('/auth/logout', (req: Request, res: Response) => {
+  const user = getCurrentUser();
+  if (user.id !== 'usr_guest') {
+    db.recordAuditEvent({
+      userId: user.id,
+      userRole: user.role,
+      userName: user.fullName,
+      eventType: 'USER_LOGOUT',
+      entityName: 'user',
+      entityId: user.id,
+      details: 'تسجيل خروج آمن وإنهاء الجلسة',
+      ipAddress: req.ip || '127.0.0.1',
+    });
+  }
+
+  currentSessionUserId = 'usr_guest';
+  res.json({ success: true, message: 'تم تسجيل الخروج بنجاح.' });
+});
+
+apiRouter.post('/auth/forgot-password', (req: Request, res: Response) => {
+  const { contact } = req.body;
+  if (!contact) {
+    return res.status(400).json({ success: false, message: 'يرجى إدخال البريد الإلكتروني أو رقم الجوال المسجل.' });
+  }
+
+  const cleanContact = contact.trim().toLowerCase();
+  const foundUser = Array.from(db.users.values()).find(
+    (u) =>
+      u.email.toLowerCase() === cleanContact ||
+      u.phone === cleanContact ||
+      u.phone.replace(/[\s-]/g, '') === cleanContact.replace(/[\s-]/g, '')
+  );
+
+  // Generate a realistic 4-digit verification code
+  const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+  if (foundUser) {
+    foundUser.resetOtp = otp;
+    foundUser.resetOtpExpires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    db.recordAuditEvent({
+      userId: foundUser.id,
+      userRole: foundUser.role,
+      userName: foundUser.fullName,
+      eventType: 'PASSWORD_RESET_REQUESTED',
+      entityName: 'user',
+      entityId: foundUser.id,
+      details: `طلب رمز استعادة كلمة المرور عبر ${foundUser.phone || foundUser.email}`,
+      ipAddress: req.ip || '127.0.0.1',
+    });
+  }
+
+  // Always return consistent success message for security, including simulatedOtp for prototype testing
+  res.json({
+    success: true,
+    simulatedOtp: otp,
+    message: 'تم إرسال رمز التحقق المؤقت إلى وسيلة الاتصال المسجلة.',
+  });
+});
+
+apiRouter.post('/auth/reset-password', (req: Request, res: Response) => {
+  const { contact, otp, newPassword } = req.body;
+
+  if (!contact || !otp || !newPassword) {
+    return res.status(400).json({ success: false, message: 'جميع الحقول مطلوبة لإعادة تعيين كلمة المرور.' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ success: false, message: 'كلمة المرور الجديدة يجب أن لا تقل عن 6 خانات.' });
+  }
+
+  const cleanContact = contact.trim().toLowerCase();
+  const foundUser = Array.from(db.users.values()).find(
+    (u) =>
+      u.email.toLowerCase() === cleanContact ||
+      u.phone === cleanContact ||
+      u.phone.replace(/[\s-]/g, '') === cleanContact.replace(/[\s-]/g, '')
+  );
+
+  if (!foundUser || !foundUser.resetOtp || foundUser.resetOtp !== otp.trim()) {
+    return res.status(400).json({ success: false, message: 'رمز التحقق غير صحيح أو غير متطابق.' });
+  }
+
+  if (foundUser.resetOtpExpires && new Date(foundUser.resetOtpExpires) < new Date()) {
+    return res.status(400).json({ success: false, message: 'انتهت صلاحية رمز التحقق، يرجى طلب رمز جديد.' });
+  }
+
+  // Update password
+  const salt = crypto.randomBytes(8).toString('hex');
+  foundUser.passwordSalt = salt;
+  foundUser.passwordHash = hashPassword(newPassword, salt);
+  foundUser.resetOtp = undefined;
+  foundUser.resetOtpExpires = undefined;
+  foundUser.failedAttempts = 0;
+  foundUser.lockedUntil = undefined;
+
+  db.recordAuditEvent({
+    userId: foundUser.id,
+    userRole: foundUser.role,
+    userName: foundUser.fullName,
+    eventType: 'PASSWORD_RESET_COMPLETED',
+    entityName: 'user',
+    entityId: foundUser.id,
+    details: 'تم تغيير كلمة المرور بنجاح وإلغاء أي قفل للمحاولات',
+    ipAddress: req.ip || '127.0.0.1',
+  });
+
+  res.json({
+    success: true,
+    message: 'تم تحديث كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.',
+  });
 });
 
 apiRouter.post('/auth/switch-role', (req: Request, res: Response) => {
@@ -163,6 +442,7 @@ apiRouter.post('/auth/switch-role', (req: Request, res: Response) => {
 
   // If role is visitor
   if (role === 'visitor') {
+    currentSessionUserId = 'usr_guest';
     return res.json({
       success: true,
       user: {
@@ -1086,24 +1366,109 @@ apiRouter.get('/admin/metrics', (req: Request, res: Response) => {
 
 apiRouter.get('/admin/users', (req: Request, res: Response) => {
   const user = getCurrentUser();
-  if (user.role !== 'system_admin') {
-    return res.status(403).json({ success: false, message: 'غير مصرح: هذا القسم لمدير النظام فقط.' });
+  if (!['system_admin', 'support_officer', 'content_moderator', 'compliance_officer'].includes(user.role)) {
+    return res.status(403).json({ success: false, message: 'غير مصرح: هذا القسم للإدارة والرقابة فقط.' });
   }
 
   const usersList = Array.from(db.users.values());
   res.json({ success: true, count: usersList.length, users: usersList });
 });
 
-apiRouter.put('/admin/users/:id/status', (req: Request, res: Response) => {
+apiRouter.post('/admin/users', (req: Request, res: Response) => {
   const user = getCurrentUser();
   if (user.role !== 'system_admin') {
+    return res.status(403).json({ success: false, message: 'غير مصرح: إضافة الكوادر والمستخدمين لمدير النظام فقط.' });
+  }
+
+  const { fullName, phone, email, role, falLicenseNumber, nationalIdMasked, orgId } = req.body;
+
+  if (!fullName || !phone || !email || !role) {
+    return res.status(400).json({ success: false, message: 'يرجى تزويد الاسم الكامل ورقم الهاتف والبريد والدور.' });
+  }
+
+  const newId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const newUser: UserAccount = {
+    id: newId,
+    fullName: fullName.trim(),
+    phone: phone.trim(),
+    email: email.trim().toLowerCase(),
+    role: role as UserRole,
+    status: 'active',
+    falLicenseNumber: falLicenseNumber ? falLicenseNumber.trim() : undefined,
+    nationalIdMasked: nationalIdMasked ? nationalIdMasked.trim() : undefined,
+    orgId: orgId || undefined,
+    avatarUrl: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 50000000)}?w=150`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.users.set(newId, newUser);
+
+  db.recordAuditEvent({
+    userId: user.id,
+    userRole: user.role,
+    userName: user.fullName,
+    eventType: 'USER_CREATED',
+    entityName: 'user',
+    entityId: newId,
+    details: `تم إنشاء حساب مستخدم جديد (${newUser.fullName}) وتعيين دور: ${newUser.role}`,
+    ipAddress: req.ip || '127.0.0.1',
+  });
+
+  res.status(201).json({ success: true, user: newUser, message: 'تم إنشاء المستخدم بنجاح.' });
+});
+
+apiRouter.put('/admin/users/:id/role', (req: Request, res: Response) => {
+  const user = getCurrentUser();
+  if (user.role !== 'system_admin') {
+    return res.status(403).json({ success: false, message: 'غير مصرح: تعديل الأدوار والصلاحيات محصور بمدير النظام.' });
+  }
+
+  const target = db.users.get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, message: 'المستخدم غير موجود.' });
+
+  const { role, reason } = req.body;
+  if (!role) {
+    return res.status(400).json({ success: false, message: 'الدور الجديد مطلوب.' });
+  }
+
+  const oldRole = target.role;
+  target.role = role as UserRole;
+  target.updatedAt = new Date().toISOString();
+
+  db.recordAuditEvent({
+    userId: user.id,
+    userRole: user.role,
+    userName: user.fullName,
+    eventType: 'USER_ROLE_CHANGED',
+    entityName: 'user',
+    entityId: target.id,
+    details: `ترقية/تعديل دور المستخدم (${target.fullName}) من [${oldRole}] إلى [${target.role}]${reason ? ` - السبب: ${reason}` : ''}`,
+    ipAddress: req.ip || '127.0.0.1',
+  });
+
+  res.json({
+    success: true,
+    user: target,
+    message: `تم تحديث دور المستخدم بنجاح إلى: ${target.role}`,
+  });
+});
+
+apiRouter.put('/admin/users/:id/status', (req: Request, res: Response) => {
+  const user = getCurrentUser();
+  if (!['system_admin', 'content_moderator'].includes(user.role)) {
     return res.status(403).json({ success: false, message: 'غير مصرح.' });
   }
 
   const target = db.users.get(req.params.id);
   if (!target) return res.status(404).json({ success: false, message: 'المستخدم غير موجود.' });
 
-  const { status } = req.body;
+  const { status, reason } = req.body;
+  if (!status || !['active', 'suspended', 'pending_verification'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'حالة الحساب غير صالحة.' });
+  }
+
+  const oldStatus = target.status;
   target.status = status;
   target.updatedAt = new Date().toISOString();
 
@@ -1114,17 +1479,46 @@ apiRouter.put('/admin/users/:id/status', (req: Request, res: Response) => {
     eventType: 'USER_STATUS_CHANGED',
     entityName: 'user',
     entityId: target.id,
-    details: `تعديل حالة حساب المستخدم (${target.fullName}) إلى: ${status}`,
+    details: `تعديل حالة حساب المستخدم (${target.fullName}) من [${oldStatus}] إلى [${status}]${reason ? ` - السبب: ${reason}` : ''}`,
     ipAddress: req.ip || '127.0.0.1',
   });
 
   res.json({ success: true, user: target, message: `تم تحديث حالة حساب المستخدم إلى: ${status}` });
 });
 
-apiRouter.get('/admin/audit-events', (req: Request, res: Response) => {
+apiRouter.delete('/admin/users/:id', (req: Request, res: Response) => {
   const user = getCurrentUser();
   if (user.role !== 'system_admin') {
-    return res.status(403).json({ success: false, message: 'غير مصرح.' });
+    return res.status(403).json({ success: false, message: 'غير مصرح: حذف الحسابات محصور بمدير النظام.' });
+  }
+
+  if (req.params.id === user.id) {
+    return res.status(400).json({ success: false, message: 'لا يمكنك حذف حسابك الإداري الحالي.' });
+  }
+
+  const target = db.users.get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, message: 'المستخدم غير موجود.' });
+
+  db.users.delete(req.params.id);
+
+  db.recordAuditEvent({
+    userId: user.id,
+    userRole: user.role,
+    userName: user.fullName,
+    eventType: 'USER_DELETED',
+    entityName: 'user',
+    entityId: req.params.id,
+    details: `تم حذف حساب المستخدم نهائياً: ${target.fullName} (${target.email})`,
+    ipAddress: req.ip || '127.0.0.1',
+  });
+
+  res.json({ success: true, message: `تم حذف حساب المستخدم (${target.fullName}) بنجاح.` });
+});
+
+apiRouter.get('/admin/audit-events', (req: Request, res: Response) => {
+  const user = getCurrentUser();
+  if (!['system_admin', 'compliance_officer'].includes(user.role)) {
+    return res.status(403).json({ success: false, message: 'غير مصرح: سجل التدقيق محصور بمدير النظام والامتثال.' });
   }
 
   res.json({ success: true, count: db.auditEvents.length, events: db.auditEvents });

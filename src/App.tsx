@@ -11,6 +11,8 @@ import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { BottomNavBar } from './components/BottomNavBar';
 import { RoleSwitcherModal } from './components/RoleSwitcherModal';
+import { AuthModal } from './components/AuthModal';
+import { VisitorGateModal } from './components/VisitorGateModal';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -274,6 +276,12 @@ export default function App() {
               isOpen={roleModalOpen}
               onClose={() => setRoleModalOpen(false)}
             />
+
+            {/* Authentication Modal (Login / Register / Forgot Password) */}
+            <AuthModal />
+
+            {/* Visitor Gate Modal (Intercepts non-authenticated action attempts) */}
+            <VisitorGateModal />
           </div>
         </ToastProvider>
       </AuthProvider>
