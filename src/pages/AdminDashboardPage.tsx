@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   TrendingUp,
   Database,
+  BookOpen,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -117,6 +118,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onNaviga
       badge: 'قاعدة بيانات محلية',
       badgeColor: 'bg-indigo-100 text-indigo-800',
       icon: <Database className="w-6 h-6 text-indigo-600" />,
+    },
+    {
+      id: 'admin-manual',
+      title: 'دليل التشغيل الكامل وتفعيل النظام',
+      desc: 'المرجع الشامل للمشغلين، بيانات الحسابات للأدوار الـ 10، مصفوفة الصلاحيات، وفحص الجاهزية الحي',
+      count: 'معتمد وجاهز',
+      badge: 'دليل التشغيل القياسي',
+      badgeColor: 'bg-emerald-100 text-emerald-800',
+      icon: <BookOpen className="w-6 h-6 text-emerald-600" />,
     },
   ];
 

@@ -22,6 +22,7 @@ import {
   LogIn,
   LogOut,
   UserPlus,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
@@ -255,6 +256,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onNavigate }) => {
                     <Database className="w-4 h-4 text-indigo-600" />
                     قاعدة MySQL
                   </button>
+
+                  <button
+                    onClick={() => handleNav('admin-manual')}
+                    className={`px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold ${
+                      currentTab === 'admin-manual'
+                        ? 'bg-emerald-700 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                    }`}
+                    title="دليل التشغيل وتفعيل النظام"
+                  >
+                    <BookOpen className="w-4 h-4 text-emerald-600" />
+                    دليل التشغيل
+                  </button>
                 </>
               )}
 
@@ -403,6 +417,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onNavigate }) => {
                 >
                   <span>قاعدة بيانات MySQL المحلية</span>
                   <Database className="w-4 h-4 text-indigo-600" />
+                </button>
+                <button
+                  onClick={() => handleNav('admin-manual')}
+                  className="w-full text-right px-3 py-2.5 rounded-xl font-bold text-slate-800 bg-slate-100 flex items-center justify-between"
+                >
+                  <span>دليل التشغيل وتفعيل النظام</span>
+                  <BookOpen className="w-4 h-4 text-emerald-600" />
                 </button>
               </>
             )}

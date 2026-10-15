@@ -39,6 +39,7 @@ import { MySQLDatabasePage } from './pages/MySQLDatabasePage';
 import { BookingsPage } from './pages/BookingsPage';
 import { ChatsPage } from './pages/ChatsPage';
 import { ServicesHubPage } from './pages/ServicesHubPage';
+import { OperationsManualPage } from './pages/OperationsManualPage';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('home');
@@ -223,6 +224,15 @@ export default function App() {
       case 'admin-database':
       case 'database':
         return <MySQLDatabasePage onBack={() => setCurrentTab('admin')} />;
+
+      case 'admin-manual':
+      case 'operations-manual':
+        return (
+          <OperationsManualPage
+            onBack={() => setCurrentTab('admin')}
+            onNavigateTab={handleNavigate}
+          />
+        );
 
       default:
         return (
