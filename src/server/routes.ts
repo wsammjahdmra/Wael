@@ -17,6 +17,16 @@ import {
   Refund,
   UserRole,
 } from '../types/database';
+import {
+  checkMySQLStatus,
+  updateMySQLConfig,
+  getActiveMySQLConfig,
+  testConnectionCredentials,
+  initializeMySQLDatabase,
+  seedMySQLDatabase,
+  generateFullDumpSQL,
+  runRawQuery,
+} from './mysql';
 
 export const apiRouter = Router();
 
@@ -1137,4 +1147,89 @@ apiRouter.post('/ai/neighborhood-insights', async (req: Request, res: Response) 
     console.error('Error generating neighborhood insights:', error);
     res.status(500).json({ success: false, message: 'تعذر جلب تحليل الحي في الوقت الراهن.' });
   }
+});
+
+// -------------------------------------------------------------
+// 11. Local MySQL Database Management & Migration Endpoints
+// -------------------------------------------------------------
+
+// Check status of MySQL
+apiRouter.get('/database/status', async (req: Request, res: Response) => {
+  const status = await checkMySQLStatus();
+  res.json({
+    success: true,
+    engine: status.connected ? 'mysql' : 'in-memory-engine',
+    mysql: status,
+    inMemoryStats: {
+      users: db.users.size,
+      properties: db.properties.size,
+      listings: db.listings.size,
+      organizations: db.organizations.size,
+      projects: db.projects.size,
+      invoices: db.invoices.size,
+      auditEvents: db.auditEvents.length,
+    },
+  });
+});
+
+// Update or test MySQL connection configuration
+apiRouter.post('/database/config', async (req: Request, res: Response) => {
+  const { host, port, user, password, database } = req.body;
+  
+  if (host) updateMySQLConfig({ host });
+  if (port) updateMySQLConfig({ port: Number(port) });
+  if (user) updateMySQLConfig({ user });
+  if (password !== undefined) updateMySQLConfig({ password });
+  if (database) updateMySQLConfig({ database });
+
+  const status = await checkMySQLStatus();
+  res.json({
+    success: true,
+    message: status.connected ? 'تم تحديث الإعدادات والاتصال بقاعدة بيانات MySQL بنجاح!' : 'تم تحديث الإعدادات، ولكن خادم MySQL غير متاح حالياً.',
+    status,
+  });
+});
+
+// Test arbitrary connection credentials
+apiRouter.post('/database/test-connection', async (req: Request, res: Response) => {
+  const { host, port, user, password, database } = req.body;
+  const result = await testConnectionCredentials({
+    host: host || '127.0.0.1',
+    port: Number(port) || 3306,
+    user: user || 'root',
+    password: password || '',
+    database: database || 'almahdi_realestate',
+  });
+  res.json(result);
+});
+
+// Create tables in MySQL
+apiRouter.post('/database/init-tables', async (req: Request, res: Response) => {
+  const result = await initializeMySQLDatabase();
+  res.json(result);
+});
+
+// Seed data in MySQL
+apiRouter.post('/database/seed', async (req: Request, res: Response) => {
+  const result = await seedMySQLDatabase();
+  res.json(result);
+});
+
+// Download full SQL Dump (Schema + Data)
+apiRouter.get('/database/export-sql', (req: Request, res: Response) => {
+  const sqlContent = generateFullDumpSQL();
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="almahdi_realestate.sql"');
+  res.send(sqlContent);
+});
+
+// Run raw custom SQL query for admin explorer
+apiRouter.post('/database/query', async (req: Request, res: Response) => {
+  const { sql } = req.body;
+  if (!sql || typeof sql !== 'string') {
+    return res.status(400).json({ success: false, message: 'استعلام SQL مطلوب.' });
+  }
+
+  const result = await runRawQuery(sql);
+  res.json(result);
 });

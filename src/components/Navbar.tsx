@@ -16,6 +16,7 @@ import {
   Calendar,
   MessageSquare,
   Grid,
+  Database,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
@@ -192,17 +193,32 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onNavigate }) => {
               )}
 
               {isStaffOrAdmin && (
-                <button
-                  onClick={() => handleNav('admin')}
-                  className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold ${
-                    currentTab.startsWith('admin')
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                  }`}
-                >
-                  <ShieldAlert className="w-4 h-4" />
-                  لوحة الإدارة والتشغيل
-                </button>
+                <>
+                  <button
+                    onClick={() => handleNav('admin')}
+                    className={`px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold ${
+                      currentTab.startsWith('admin') && currentTab !== 'admin-database'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    لوحة الإدارة
+                  </button>
+
+                  <button
+                    onClick={() => handleNav('admin-database')}
+                    className={`px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold ${
+                      currentTab === 'admin-database'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+                    }`}
+                    title="إدارة قاعدة بيانات MySQL المحلية"
+                  >
+                    <Database className="w-4 h-4 text-indigo-600" />
+                    قاعدة MySQL
+                  </button>
+                </>
               )}
 
               <button
@@ -302,12 +318,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onNavigate }) => {
               </button>
             )}
             {isStaffOrAdmin && (
-              <button
-                onClick={() => handleNav('admin')}
-                className="w-full text-right px-3 py-2.5 rounded-xl font-bold text-emerald-800 bg-emerald-50"
-              >
-                لوحة الإدارة والتشغيل الشاملة
-              </button>
+              <>
+                <button
+                  onClick={() => handleNav('admin')}
+                  className="w-full text-right px-3 py-2.5 rounded-xl font-bold text-emerald-800 bg-emerald-50"
+                >
+                  لوحة الإدارة والتشغيل الشاملة
+                </button>
+                <button
+                  onClick={() => handleNav('admin-database')}
+                  className="w-full text-right px-3 py-2.5 rounded-xl font-bold text-indigo-800 bg-indigo-50 flex items-center justify-between"
+                >
+                  <span>قاعدة بيانات MySQL المحلية</span>
+                  <Database className="w-4 h-4 text-indigo-600" />
+                </button>
+              </>
             )}
             <button
               onClick={() => handleNav('help')}

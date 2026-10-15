@@ -12,6 +12,7 @@ import {
   Sparkles,
   ArrowUpRight,
   TrendingUp,
+  Database,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -107,6 +108,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onNaviga
       badge: 'تخصيص كامل',
       badgeColor: 'bg-teal-100 text-teal-800',
       icon: <Settings className="w-6 h-6 text-teal-600" />,
+    },
+    {
+      id: 'admin-database',
+      title: 'قاعدة بيانات MySQL المحلية',
+      desc: 'ربط وإدارة قاعدة بيانات MySQL المحلية (XAMPP / Laragon / Docker)، استيراد وتصدير الجداول ومحرر الاستعلامات',
+      count: 'MySQL 8.0+',
+      badge: 'قاعدة بيانات محلية',
+      badgeColor: 'bg-indigo-100 text-indigo-800',
+      icon: <Database className="w-6 h-6 text-indigo-600" />,
     },
   ];
 

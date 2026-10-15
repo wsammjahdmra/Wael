@@ -222,4 +222,49 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // MySQL Local Database API
+  getDatabaseStatus: () =>
+    request<{
+      success: boolean;
+      engine: 'mysql' | 'in-memory-engine';
+      mysql: {
+        connected: boolean;
+        version?: string;
+        latencyMs?: number;
+        tablesCount?: number;
+        tables?: string[];
+        error?: string;
+        config: { host: string; port: number; user: string; database: string; hasPassword: boolean };
+      };
+      inMemoryStats: Record<string, number>;
+    }>('/database/status'),
+
+  updateDatabaseConfig: (config: { host?: string; port?: number; user?: string; password?: string; database?: string }) =>
+    request<{ success: boolean; message: string; status: any }>('/database/config', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  testDatabaseConnection: (config: { host?: string; port?: number; user?: string; password?: string; database?: string }) =>
+    request<{ success: boolean; message: string; version?: string; latencyMs?: number }>('/database/test-connection', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  initDatabaseTables: () =>
+    request<{ success: boolean; message: string; tablesCount?: number }>('/database/init-tables', {
+      method: 'POST',
+    }),
+
+  seedDatabaseTables: () =>
+    request<{ success: boolean; message: string }>('/database/seed', {
+      method: 'POST',
+    }),
+
+  executeDatabaseQuery: (sql: string) =>
+    request<{ success: boolean; rows?: any[]; fields?: string[]; affectedRows?: number; message?: string }>('/database/query', {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    }),
 };

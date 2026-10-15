@@ -33,6 +33,7 @@ import { AdminFinancePage } from './pages/AdminFinancePage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminSettingsPage } from './pages/AdminSettingsPage';
+import { MySQLDatabasePage } from './pages/MySQLDatabasePage';
 import { BookingsPage } from './pages/BookingsPage';
 import { ChatsPage } from './pages/ChatsPage';
 import { ServicesHubPage } from './pages/ServicesHubPage';
@@ -216,6 +217,10 @@ export default function App() {
 
       case 'admin-settings':
         return <AdminSettingsPage onBack={() => setCurrentTab('admin')} />;
+
+      case 'admin-database':
+      case 'database':
+        return <MySQLDatabasePage onBack={() => setCurrentTab('admin')} />;
 
       default:
         return (
